@@ -1,0 +1,6 @@
+
+pandas
+apache-airflow-providers-snowflake>=5.0.0
+snowflake-connector-python[pandas]>=3.7.0
+cryptography>=42.0.0
+holidays

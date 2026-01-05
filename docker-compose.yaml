@@ -1,0 +1,61 @@
+services:
+  postgres:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DB=airflow
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # NOWA USŁUGA: Inicjalizacja bazy
+  airflow-init:
+    build: .
+    depends_on:
+      - postgres
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__TEST_CONNECTION=Enabled
+    command: >
+      bash -c "airflow db migrate &&
+      airflow users create --username airflow --password airflow --firstname Marcin --lastname Student --role Admin --email s34526@pjwstk.edu.pl"
+
+  airflow-webserver:
+    build: .
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./airflow:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+      - ./sql:/opt/airflow/sql
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__TEST_CONNECTION=Enabled
+      - AIRFLOW__WEBSERVER__SECRET_KEY=staly_klucz_123
+    ports:
+      - "8080:8080"
+    command: webserver
+
+  airflow-scheduler:
+    build: .
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./airflow:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+      - ./sql:/opt/airflow/sql
+    environment:
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres/airflow
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__TEST_CONNECTION=Enabled
+      - AIRFLOW__WEBSERVER__SECRET_KEY=staly_klucz_123
+    command: scheduler
