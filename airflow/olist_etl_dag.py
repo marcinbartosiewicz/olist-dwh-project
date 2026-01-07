@@ -28,51 +28,62 @@ def etl_and_load():
     sellers = pd.read_csv(f'{data_path}olist_sellers_dataset.csv')
 
     
-    
-    dim_prod = prod.merge(trans, on='product_category_name', how='left')[['product_id', 'product_category_name_english']]
+    dim_prod = prod.merge(trans, on='product_category_name', how='left')[['product_id', 'product_category_name_english', 'product_weight_g']]
     dim_prod.columns = [c.upper() for c in dim_prod.columns]
 
+   
+    date_cols = ['order_purchase_timestamp', 'order_delivered_customer_date', 'order_estimated_delivery_date']
+    for col in date_cols:
+        orders[col] = pd.to_datetime(orders[col])
+
     
-    orders['order_purchase_timestamp'] = pd.to_datetime(orders['order_purchase_timestamp'])
-    avg_rev = rev.groupby('order_id')['review_score'].mean().reset_index()
-    fact = items.merge(orders, on='order_id').merge(sellers, on='seller_id').merge(avg_rev, on='order_id', how='left')
-    fact['order_purchase_timestamp'] = fact['order_purchase_timestamp'].dt.strftime('%Y-%m-%d')
-    min_date = fact['order_purchase_timestamp'].min()
-    max_date = fact['order_purchase_timestamp'].max()
+    min_date = orders['order_purchase_timestamp'].min().date()
+    max_date = orders['order_purchase_timestamp'].max().date()
     dr = pd.date_range(start=min_date, end=max_date)
     
-    
     dim_date = pd.DataFrame({'DATE_KEY': dr})
-    
-    
     dim_date['DAY_OF_WEEK'] = dim_date['DATE_KEY'].dt.dayofweek
+    dim_date['DAY_NAME'] = dim_date['DATE_KEY'].dt.day_name()
     dim_date['MONTH'] = dim_date['DATE_KEY'].dt.month
+    dim_date['MONTH_NAME'] = dim_date['DATE_KEY'].dt.month_name()
+    dim_date['QUARTER'] = dim_date['DATE_KEY'].dt.quarter
     dim_date['YEAR'] = dim_date['DATE_KEY'].dt.year
     
     br_holidays = holidays.Brazil()
     dim_date['IS_HOLIDAY'] = dim_date['DATE_KEY'].apply(lambda x: x in br_holidays)
-    
-    
-    dim_date['DATE_KEY'] = dim_date['DATE_KEY'].dt.strftime('%Y-%m-%d')
-    
-    
+    dim_date['DATE_KEY'] = dim_date['DATE_KEY'].dt.date 
     dim_date.columns = [c.upper() for c in dim_date.columns]
 
-   
-    fact['DATE_KEY'] = fact['order_purchase_timestamp']
+    
+    avg_rev = rev.groupby('order_id')['review_score'].mean().reset_index()
     
     
-    fact_final = fact[['order_item_id', 'order_id', 'product_id', 'customer_id', 'seller_id',
-    'price', 'freight_value', 'order_purchase_timestamp', 
-    'order_delivered_customer_date', 'order_estimated_delivery_date', 
-    'review_score', 'DATE_KEY']]
-    fact_final.columns = [c.upper() for c in fact_final.columns]
+    fact = items.merge(orders, on='order_id', how='inner') \
+                .merge(sellers, on='seller_id', how='inner') \
+                .merge(avg_rev, on='order_id', how='left')
 
+
+    
+    fact['PURCHASE_DATE_KEY'] = fact['order_purchase_timestamp'].dt.date
+    fact['ESTIMATED_DELIVERY_KEY'] = fact['order_estimated_delivery_date'].dt.date
+    fact['ACTUAL_DELIVERY_KEY'] = fact['order_delivered_customer_date'].dt.date
+
+    fact.columns = [c.upper() for c in fact.columns]
+    fact_final = fact[[
+        'PRODUCT_ID', 'CUSTOMER_ID', 'SELLER_ID', 
+        'PURCHASE_DATE_KEY', 'ESTIMATED_DELIVERY_KEY', 'ACTUAL_DELIVERY_KEY',
+        'ORDER_ID', 'PRICE', 'FREIGHT_VALUE', 'REVIEW_SCORE'
+    ]]
+
+    
     write_pandas(conn, sellers.rename(columns=str.upper), 'DIM_SELLERS')
     write_pandas(conn, cust.rename(columns=str.upper), 'DIM_CUSTOMERS')
     write_pandas(conn, dim_prod, 'DIM_PRODUCTS')
     write_pandas(conn, dim_date, 'DIM_DATE')
     write_pandas(conn, fact_final, 'FACT_ORDER_ITEMS')
+
+    
+
 
 with DAG('olist_snowflake_pipeline', default_args=default_args, schedule_interval=None,template_searchpath=['/opt/airflow'], 
     catchup=False) as dag:
